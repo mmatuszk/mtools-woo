@@ -12,7 +12,7 @@ Author: Marcin Matuszkiewicz
 add_action('admin_menu', 'mtoolswoo_add_admin_menu');
 
 function mtoolswoo_add_admin_menu() {
-    add_management_page('MTools Settings', 'MTools Settings', 'manage_options', 'mtoolswoo_settings', 'mtoolswoo_settings_page');
+    add_management_page('MTools Woo Settings', 'MTools Woo Settings', 'manage_options', 'mtoolswoo_settings', 'mtoolswoo_settings_page');
 }
 
 // implement MTools setting page functionality
@@ -34,7 +34,7 @@ function mtoolswoo_settings_page() {
     // Check if the "Test OpenAI" button was pressed
     $test_output = '';
     if (isset($_POST['test_openai'])) {
-        $test_output = query_openai("what model are you? ");
+        $test_output = mtoolswoo_query_openai("what model are you? ");
     }
 
     echo '<div class="wrap">';
@@ -89,67 +89,6 @@ function mtoolswoo_deactivate() {
     delete_option('mtoolswoo_model');
 }
 
-add_filter('woocommerce_product_data_tabs', 'add_tools_tab', 50, 1);
-function add_tools_tab($tabs) {
-    $tabs['tools'] = array(
-        'label'  => __('Tools', 'woocommerce'),
-        'target' => 'tools_product_data',
-        'class'  => array(),
-    );
-    return $tabs;
-}
-
-add_action('woocommerce_product_data_panels', 'tools_tab_content');
-
-function tools_tab_content() {
-    echo '<div id="tools_product_data" class="panel woocommerce_options_panel">';
-    echo '<div class="options_group">';
-    echo '<button type="button" class="button button-secondary" id="normalize-title-button">' . __('Normalize', 'woocommerce') . '</button>';
-    echo '</div>';
-    echo '</div>';
-}
-
-add_action('admin_enqueue_scripts', 'enqueue_normalize_title_scripts');
-
-function enqueue_normalize_title_scripts() {
-    wp_enqueue_script('normalize-title-script', plugins_url('js/normalize-title.js', __FILE__), array('jquery'), '1.0.0', true);
-    wp_localize_script('normalize-title-script', 'normalizeTitleParams', array(
-        'ajax_url' => admin_url('admin-ajax.php'),
-        'nonce' => wp_create_nonce('normalize-title-nonce')
-    ));
-}
-
-add_action('wp_ajax_normalize_product_title', 'handle_normalize_title');
-
-function handle_normalize_title() {
-
-    check_ajax_referer('normalize-title-nonce', 'nonce');
-
-    // Get product ID from AJAX request
-    if (isset($_POST['product_id'])) {
-        $product_id = intval($_POST['product_id']);  // Ensure it's a number
-        $product = wc_get_product($product_id);
-
-        if ($product) {
-            $title = $product->get_name();
-            $normalized_title = send_title_to_openai($title);
-
-            error_log('Original Title: ' . $title);
-            error_log('Normalized Title: ' . $normalized_title);
-            
-            if ($normalized_title) {
-                wp_send_json_success($normalized_title);
-            } else {
-                wp_send_json_error('Failed to normalize.');
-            }            
-        } else {
-            error_log('Product not found.');
-        }
-    } else {
-        error_log('Product ID not provided.');
-    }
-}
-
 /**
  * Queries the OpenAI API with a given prompt.
  *
@@ -163,7 +102,7 @@ function handle_normalize_title() {
  * @return string|bool Returns the generated response from OpenAI or false in case of an error.
  */
 
- function query_openai($prompt) {
+ function mtoolswoo_query_openai($prompt) {
     // Fetch API key and model from the WordPress database
     $api_key = get_option('mtoolswoo_openai_key');
     $model = get_option('mtoolswoo_model');
