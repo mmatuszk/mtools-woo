@@ -2,7 +2,7 @@
 /*
 Plugin Name: MTools Woo
 Description: Tools for updating woocommerce products.
-Version: 1.1
+Version: 1.1.1
 Author: Marcin Matuszkiewicz
 */
 
@@ -204,7 +204,7 @@ function mtoolswoo_handle_normalize_title() {
 
         if ($product) {
             $title = $product->get_name();
-            $prompt = "normalize to title case, keep case of MSRP, roman numbers: ".$title;
+            $prompt = "normalize to title case; keep case of MSRP, roman numbers;replace $ with USD: ".$title;
             $normalized_title = mtoolswoo_query_openai($prompt);
 
             error_log('Original Title: ' . $title);
