@@ -109,7 +109,7 @@ function mtoolswoo_deactivate() {
 
     // Ensure that we have the necessary settings
     if (!$api_key || !$model) {
-        error_log('OpenAI settings not configured in MTools.');
+        error_log('OpenAI settings not configured in MTools Woo.');
         return false;
     }
 
@@ -151,3 +151,161 @@ function mtoolswoo_deactivate() {
     // Return the content of the response, assuming the second message contains the bot's reply.
     return $responseArray['choices'][0]['message']['content'] ?? '';
 }
+
+/*
+ * Add tools tab to product edit page
+ */
+
+add_filter('woocommerce_product_data_tabs', 'add_mtoolswoo_tab', 50, 1);
+function add_mtoolswoo_tab($tabs) {
+    $tabs['tools'] = array(
+        'label'  => __('MTools', 'woocommerce'),
+        'target' => 'tools_product_data',
+        'class'  => array(),
+    );
+    return $tabs;
+}
+
+add_action('woocommerce_product_data_panels', 'mtoolswoo_tab_content');
+
+function mtoolswoo_tab_content() {
+    echo '<div id="tools_product_data" class="panel woocommerce_options_panel">';
+    echo '<div class="options_group">';
+    echo '<button type="button" class="button button-secondary" id="normalize-title-button">' . __('Normalize Title', 'woocommerce') . '</button>';
+    echo '</div>';
+    echo '</div>';
+}
+
+add_action('admin_enqueue_scripts', 'enqueue_mtoolswoo_scripts');
+
+function enqueue_mtoolswoo_scripts() {
+    wp_enqueue_script('mtoolswoo-script', plugins_url('js/normalize-title.js', __FILE__), array('jquery'), '1.0.0', true);
+    wp_localize_script('mtoolswoo-script', 'normalizeTitleParams', array(
+        'ajax_url' => admin_url('admin-ajax.php'),
+        'nonce' => wp_create_nonce('mtoolswoo-normalize-title-nonce')
+    ));
+}
+
+add_action('wp_ajax_mtoolswoo_normalize_title', 'mtoolswoo_handle_normalize_title');
+
+function mtoolswoo_handle_normalize_title() {
+
+    check_ajax_referer('mtoolswoo-normalize-title-nonce', 'nonce');
+
+    // Get product ID from AJAX request
+    if (isset($_POST['product_id'])) {
+        $product_id = intval($_POST['product_id']);  // Ensure it's a number
+        $product = wc_get_product($product_id);
+
+        if ($product) {
+            $title = $product->get_name();
+            $prompt = "normalize to title case, keep case of MSRP, roman numbers: ".$title;
+            $normalized_title = mtoolswoo_query_openai($prompt);
+
+            error_log('Original Title: ' . $title);
+            error_log('Normalized Title: ' . $normalized_title);
+            
+            if ($normalized_title) {
+                wp_send_json_success($normalized_title);
+            } else {
+                wp_send_json_error('Failed to normalize.');
+            }            
+        } else {
+            error_log('Product not found.');
+        }
+    } else {
+        error_log('Product ID not provided.');
+    }
+}
+
+function mtoolswoo_set_primary_color_attribute($product_id) {
+    error_log('mtoolswoo_set_primary_color_attribute function triggered.');
+
+    // Check if the product has an image
+    if (has_post_thumbnail($product_id)) {
+        $image = wp_get_attachment_image_src(get_post_thumbnail_id($product_id), 'single-post-thumbnail');
+        error_log('Product Image URL: ' . $image[0]);
+        
+        // Use Composer's autoload for ColorThief
+        require_once(plugin_dir_path(__FILE__) . 'vendor/autoload.php');
+        
+        $colorThief = new ColorThief\ColorThief();
+        $dominantColor = $colorThief->getColor($image[0]);
+        
+        if (!$dominantColor) {
+            error_log('Failed to get the dominant color.');
+            return;  // exit if ColorThief fails
+        }
+
+        $dominantColorHex = sprintf("#%02x%02x%02x", $dominantColor[0], $dominantColor[1], $dominantColor[2]);
+        error_log('Primary Color: ' . $dominantColorHex);
+
+        // Fetch the product object
+        $product = wc_get_product($product_id);
+        if (!$product) {
+            error_log('Failed to get the product object.');
+            return;
+        }
+
+        // Check if the term exists
+        $term = get_term_by('name', $dominantColorHex, 'pa_primary_color');
+        if (!$term) {
+            $term = wp_insert_term($dominantColorHex, 'pa_primary_color');
+            if (is_wp_error($term)) {
+                error_log('Failed to create term: ' . $term->get_error_message());
+                return;
+            }
+            $term_id = $term['term_id'];
+        } else {
+            $term_id = $term->term_id;
+        }
+
+        // Set the 'Primary Color' attribute for the product using the WooCommerce native method
+        $attributes = $product->get_attributes();
+        $attributes['pa_primary_color'] = array(
+            'name' => 'pa_primary_color',
+            'value' => array($term_id),
+            'position' => 1,
+            'is_visible' => 1,
+            'is_variation' => 0,
+            'is_taxonomy' => 1
+        );
+        $product->set_attributes($attributes);
+        error_log('Attributes to be saved: ' . print_r($attributes, true));
+        $saved = $product->save();
+        if ( wc_notice_count( 'error' ) > 0 ) {
+            $errors = wc_get_notices( 'error' );
+            error_log( 'WooCommerce Errors: ' . print_r( $errors, true ) );
+            wc_clear_notices();
+        }
+        
+        
+        if (is_wp_error($saved)) {
+            error_log('Failed to save the product attributes: ' . $saved->get_error_message());
+        } else {
+            error_log('Product attributes saved successfully.');
+        }
+
+        // Log the product attributes after saving
+        $current_attributes = $product->get_attributes();
+        $attributes_log = array();
+        foreach ($current_attributes as $attribute_key => $attribute_data) {
+            if ($attribute_data->is_taxonomy()) {
+                $terms = wp_get_post_terms($product_id, $attribute_key);
+                $term_names = array_map(function ($term) {
+                    return $term->name;
+                }, $terms);
+                $attributes_log[$attribute_key] = implode(', ', $term_names);
+            } else {
+                $attributes_log[$attribute_key] = $attribute_data->get_options();
+            }
+        }
+        error_log('Product attributes after saving: ' . print_r($attributes_log, true));
+
+    } else {
+        error_log('Product does not have an image.');
+    }
+}
+
+
+add_action('woocommerce_process_product_meta', 'mtoolswoo_set_primary_color_attribute');
