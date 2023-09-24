@@ -2,7 +2,7 @@
 /*
 Plugin Name: MTools Woo
 Description: Tools for updating woocommerce products.
-Version: 1.2
+Version: 1.3
 Author: Marcin Matuszkiewicz
 */
 
@@ -17,6 +17,8 @@ Author: Marcin Matuszkiewicz
  *      Exclude Cat @ WooCommerce Product Search Results
  *      Add link to admin order confirmation email
  *      Add Woocommerce Filter by "On Sale" to Woocommerc->Products
+ * 1.3
+ *      Add 'End Sale' to 'Bulk Actions' dropdown
  *      
  */
 
@@ -377,3 +379,22 @@ function custom_woocommerce_filter_by_onsale_where_statement($where) {
     return $where;
 }
 add_filter('posts_where' , 'custom_woocommerce_filter_by_onsale_where_statement');
+
+/*
+ * Woocommerce Add 'End Sale' to 'Bulk Actions' dropdown
+ */
+function custom_bulk_admin_footer() {
+    global $post_type;
+
+    if ( 'product' == $post_type ) {
+        ?>
+        <script type="text/javascript">
+            jQuery(document).ready(function() {
+                jQuery('<option>').val('end_sale').text('<?php _e('End Sale')?>').appendTo("select[name='action']");
+                jQuery('<option>').val('end_sale').text('<?php _e('End Sale')?>').appendTo("select[name='action2']");
+            });
+        </script>
+        <?php
+    }
+}
+add_action('admin_footer', 'custom_bulk_admin_footer');
