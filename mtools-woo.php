@@ -2,7 +2,7 @@
 /*
 Plugin Name: MTools Woo
 Description: Tools for updating woocommerce products.
-Version: 1.1.1
+Version: 1.2
 Author: Marcin Matuszkiewicz
 */
 
@@ -10,6 +10,14 @@ Author: Marcin Matuszkiewicz
  * Revision history
  * 1.0 - plugin framework
  * 1.1 - normalize title implementation
+ * 1.2
+ *      Add SKU to products page
+ *      Add Stock Quantity @ WooCommerce Shop / Cart / Archive Pages
+ *      Exclude products from a particular category on the shop page
+ *      Exclude Cat @ WooCommerce Product Search Results
+ *      Add link to admin order confirmation email
+ *      Add Woocommerce Filter by "On Sale" to Woocommerc->Products
+ *      
  */
 
 // add the "MTools Settings" section in the Admin Tools menu
@@ -223,3 +231,149 @@ function mtoolswoo_handle_normalize_title() {
     }
 }
 
+/**
+ * Add SKU to products page
+ */
+add_action( 'woocommerce_single_product_summary', 'dev_designs_show_sku', 5 );
+function dev_designs_show_sku(){
+    global $product;
+    echo 'SKU: ' . $product->get_sku();
+}
+
+/**
+ *       Stock Quantity @ WooCommerce Shop / Cart / Archive Pages
+*/
+add_action( 'woocommerce_after_shop_loop_item', 'njengah_show_stock_shop', 10 );
+function njengah_show_stock_shop() {
+   global $product;
+   echo wc_get_stock_html( $product );
+}
+
+/**
+ * Exclude products from a particular category on the shop page
+ */
+function custom_pre_get_posts_query( $q ) {
+
+    $tax_query = (array) $q->get( 'tax_query' );
+
+    $tax_query[] = array(
+           'taxonomy' => 'product_cat',
+           'field' => 'slug',
+           'terms' => array( 'bargain-bin' ), // Don't display products in the clothing category on the shop page.
+           'operator' => 'NOT IN'
+    );
+
+
+    $q->set( 'tax_query', $tax_query );
+
+}
+//add_action( 'woocommerce_product_query', 'custom_pre_get_posts_query' );  
+
+/**
+ * @snippet       Exclude Cat @ WooCommerce Product Search Results
+ * @how-to        Get CustomizeWoo.com FREE
+ * @author        Rodolfo Melogli
+ * @compatible    WooCommerce 6
+ * @donate $9     https://businessbloomer.com/bloomer-armada/
+ */
+ 
+add_action( 'pre_get_posts', 'bbloomer_exclude_category_woocommerce_search' );
+ 
+function bbloomer_exclude_category_woocommerce_search( $q ) {
+   if ( ! $q->is_main_query() ) return;
+   if ( ! $q->is_search() ) return;
+   if ( ! is_admin() ) {
+      $q->set( 'tax_query', array( array(
+         'taxonomy' => 'product_cat',
+         'field' => 'slug',
+         'terms' => array( 'bargain-bin' ), // change 'courses' with your cat slug/s
+         'operator' => 'NOT IN'
+      )));
+   }
+}
+
+/*
+ * add link to admin order confirmation email
+ */
+add_filter( 'woocommerce_order_item_name', 'display_product_title_as_link', 10, 2 );
+function display_product_title_as_link( $item_name, $item ) {
+
+    $_product = wc_get_product( $item['variation_id'] ? $item['variation_id'] : $item['product_id'] );
+
+    $link = get_permalink( $_product->get_id() );
+
+    return '<a href="'. $link .'"  rel="nofollow">'. $item_name .'</a>';
+}
+
+/**
+ * add shipping and return policy links to check out page
+ */ 
+add_action( 'woocommerce_review_order_before_submit', 'add_policy_links', 9 );
+
+function add_policy_links() {
+    echo '<div class="policy-links">';
+    echo 'By proceeding, you agree to our <a href="https://silkresource.com/store/shipping-policy/" target="_blank">Shipping Policy</a> and <a href="https://silkresource.com/store/refund-and-return-policy/" target="_blank">Return Policy</a>.';
+    echo '</div>';
+}
+
+/*
+ * Woocommerce Filter by on sale
+ */
+function custom_woocommerce_filter_by_onsale($output) {
+    global $wp_query;
+    
+    $selected = filter_input(INPUT_GET, 'product_sale', FILTER_VALIDATE_INT);
+    if ($selected == false) {
+        $selected = 0;
+    }
+    
+    $output .= '
+        <select id="dropdown_product_sale" name="product_sale">
+            <option value="">Filter by sale</option>
+            <option value="1" ' . (($selected === 1) ? 'selected="selected"' : '') . '>On sale</option>
+            <option value="2" ' . (($selected === 2) ? 'selected="selected"' : '') . '>Not on sale</option>
+        </select>
+    ';
+ 
+    return $output;
+}
+add_action('woocommerce_product_filters', 'custom_woocommerce_filter_by_onsale');
+ 
+/*
+ * Add Woocommerce Filter by "On Sale" to Woocommerc->Products
+ */
+function custom_woocommerce_filter_by_onsale_where_statement($where) {
+    global $wp_query, $wpdb;
+ 
+    // Get selected value
+    $selected = filter_input(INPUT_GET, 'product_sale', FILTER_VALIDATE_INT);
+    
+    // Only trigger if required
+    if (!is_admin() || get_query_var('post_type') != "product" || !$selected) {
+        return $where;
+    }
+ 
+    $querystr = '
+            SELECT p.ID, p.post_parent
+            FROM ' . $wpdb->posts . ' p
+            WHERE p.ID IN (
+                SELECT post_id FROM ' . $wpdb->postmeta . ' pm WHERE pm.meta_key = "_sale_price" AND pm.meta_value > \'\'
+            )
+        ';
+        
+        $pageposts = $wpdb->get_results($querystr, OBJECT);
+        
+        $productsIDs = array_map(function($n){
+            return $n->post_parent > 0 ? $n->post_parent : $n->ID;
+        }, $pageposts);
+
+    if ($selected == 1) {
+        $where .= ' AND ' . $wpdb->posts . '.ID IN (' . implode(",", $productsIDs) . ') ';
+    } 
+    elseif ($selected == 2) {
+        $where .= ' AND ' . $wpdb->posts . '.ID NOT IN (' . implode(",", $productsIDs) . ') ';
+    }
+        
+    return $where;
+}
+add_filter('posts_where' , 'custom_woocommerce_filter_by_onsale_where_statement');
