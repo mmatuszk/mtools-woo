@@ -2,7 +2,7 @@
 /*
 Plugin Name: MTools Woo
 Description: Tools for updating woocommerce products.
-Version: 1.3
+Version: 1.4
 Author: Marcin Matuszkiewicz
 */
 
@@ -19,6 +19,8 @@ Author: Marcin Matuszkiewicz
  *      Add Woocommerce Filter by "On Sale" to Woocommerc->Products
  * 1.3
  *      Add 'End Sale' to 'Bulk Actions' dropdown
+ * 1.4
+ *      Add a FAQ button to product listings and product summary
  *      
  */
 
@@ -398,3 +400,19 @@ function custom_bulk_admin_footer() {
     }
 }
 add_action('admin_footer', 'custom_bulk_admin_footer');
+
+/*
+ * Woocommerce Add a FAQ button to product listings and product summary
+ */
+function add_faq_button_to_product_listing() {
+    $faq_url = site_url('/faq'); // Dynamically generates the correct URL based on where WordPress is installed
+    echo '<a href="' . esc_url($faq_url) . '" class="button faq-button">FAQ</a>';
+}
+add_action( 'woocommerce_after_shop_loop_item_title', 'add_faq_button_to_product_listing', 20 );
+
+function add_faq_button_to_product_description() {
+    $faq_url = site_url('/faq'); // Dynamically generates the correct URL based on where WordPress is installed
+    echo '<a href="' . esc_url($faq_url) . '" class="button faq-button">FAQ</a>';
+}
+add_action( 'woocommerce_single_product_summary', 'add_faq_button_to_product_description', 25 );
+
