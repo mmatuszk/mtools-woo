@@ -2,7 +2,7 @@
 /*
 Plugin Name: MTools Woo
 Description: Tools for updating woocommerce products.
-Version: 1.4
+Version: 1.6
 Author: Marcin Matuszkiewicz
 */
 
@@ -21,7 +21,11 @@ Author: Marcin Matuszkiewicz
  *      Add 'End Sale' to 'Bulk Actions' dropdown
  * 1.4
  *      Add a FAQ button to product listings and product summary
- *      
+ * 1.5
+ *      Include Order Notes in Admin Order Search
+ * 1.6 
+ *      Renamed "On Sale" filter to "M Custom Filters"
+ *      Added "featured" filter to M Custom Filters
  */
 
 // add the "MTools Settings" section in the Admin Tools menu
@@ -321,66 +325,84 @@ function add_policy_links() {
 }
 
 /*
- * Woocommerce Filter by on sale
+ * WooCommerce Custom Filter: "M Custom Filters" 
+ * Adds a dropdown filter in the WooCommerce product admin area for Featured, On Sale, and Not On Sale products.
  */
-function custom_woocommerce_filter_by_onsale($output) {
+function m_custom_woocommerce_filter($output) {
     global $wp_query;
-    
-    $selected = filter_input(INPUT_GET, 'product_sale', FILTER_VALIDATE_INT);
-    if ($selected == false) {
+
+    // Get selected filter value from the GET request
+    $selected = filter_input(INPUT_GET, 'm_custom_filter', FILTER_VALIDATE_INT);
+    if ($selected === false) {
         $selected = 0;
     }
-    
+
+    // Append the dropdown options for "Featured," "On Sale," and "Not On Sale" products
     $output .= '
-        <select id="dropdown_product_sale" name="product_sale">
-            <option value="">Filter by sale</option>
-            <option value="1" ' . (($selected === 1) ? 'selected="selected"' : '') . '>On sale</option>
-            <option value="2" ' . (($selected === 2) ? 'selected="selected"' : '') . '>Not on sale</option>
+        <select id="dropdown_m_custom_filter" name="m_custom_filter">
+            <option value="">M Custom Filters</option>
+            <option value="1" ' . (($selected === 1) ? 'selected="selected"' : '') . '>Featured</option>
+            <option value="2" ' . (($selected === 2) ? 'selected="selected"' : '') . '>On Sale</option>
+            <option value="3" ' . (($selected === 3) ? 'selected="selected"' : '') . '>Not On Sale</option>
         </select>
     ';
  
     return $output;
 }
-add_action('woocommerce_product_filters', 'custom_woocommerce_filter_by_onsale');
- 
+add_action('woocommerce_product_filters', 'm_custom_woocommerce_filter');
+
 /*
- * Add Woocommerce Filter by "On Sale" to Woocommerc->Products
+ * Modify WooCommerce Query for "M Custom Filters"
+ * Adjusts the WooCommerce admin query to filter products based on Featured, On Sale, or Not On Sale.
  */
-function custom_woocommerce_filter_by_onsale_where_statement($where) {
-    global $wp_query, $wpdb;
- 
-    // Get selected value
-    $selected = filter_input(INPUT_GET, 'product_sale', FILTER_VALIDATE_INT);
-    
-    // Only trigger if required
+function m_custom_woocommerce_filter_where_statement($where) {
+    global $wpdb;
+
+    // Retrieve selected filter option (1 for Featured, 2 for On Sale, 3 for Not On Sale)
+    $selected = filter_input(INPUT_GET, 'm_custom_filter', FILTER_VALIDATE_INT);
+
+    // Only modify the query if we're in the WooCommerce admin, viewing products, and a filter is selected
     if (!is_admin() || get_query_var('post_type') != "product" || !$selected) {
         return $where;
     }
- 
-    $querystr = '
-            SELECT p.ID, p.post_parent
-            FROM ' . $wpdb->posts . ' p
-            WHERE p.ID IN (
-                SELECT post_id FROM ' . $wpdb->postmeta . ' pm WHERE pm.meta_key = "_sale_price" AND pm.meta_value > \'\'
-            )
-        ';
-        
-        $pageposts = $wpdb->get_results($querystr, OBJECT);
-        
-        $productsIDs = array_map(function($n){
-            return $n->post_parent > 0 ? $n->post_parent : $n->ID;
-        }, $pageposts);
 
+    // Query for Featured products using the 'product_visibility' taxonomy and the 'featured' term
     if ($selected == 1) {
-        $where .= ' AND ' . $wpdb->posts . '.ID IN (' . implode(",", $productsIDs) . ') ';
-    } 
-    elseif ($selected == 2) {
-        $where .= ' AND ' . $wpdb->posts . '.ID NOT IN (' . implode(",", $productsIDs) . ') ';
+        $where .= " AND {$wpdb->posts}.ID IN (
+            SELECT object_id
+            FROM {$wpdb->term_relationships} AS tr
+            JOIN {$wpdb->term_taxonomy} AS tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
+            JOIN {$wpdb->terms} AS t ON tt.term_id = t.term_id
+            WHERE tt.taxonomy = 'product_visibility'
+              AND t.slug = 'featured'
+        )";
     }
-        
+    // Query for On Sale products
+    elseif ($selected == 2) {
+        $where .= " AND {$wpdb->posts}.ID IN (
+            SELECT post_id 
+            FROM {$wpdb->postmeta} 
+            WHERE meta_key = '_sale_price' 
+            AND meta_value > ''
+        )";
+    }
+    // Query for Not On Sale products
+    elseif ($selected == 3) {
+        $where .= " AND {$wpdb->posts}.ID NOT IN (
+            SELECT post_id 
+            FROM {$wpdb->postmeta} 
+            WHERE meta_key = '_sale_price' 
+            AND meta_value > ''
+        )";
+    }
+
     return $where;
 }
-add_filter('posts_where' , 'custom_woocommerce_filter_by_onsale_where_statement');
+add_filter('posts_where', 'm_custom_woocommerce_filter_where_statement');
+
+
+
+
 
 /*
  * Woocommerce Add 'End Sale' to 'Bulk Actions' dropdown
@@ -416,3 +438,37 @@ function add_faq_button_to_product_description() {
 }
 add_action( 'woocommerce_single_product_summary', 'add_faq_button_to_product_description', 25 );
 
+/*
+ * WooCommerce: Include Order Notes in Admin Order Search
+ * 
+ * This snippet modifies the default WooCommerce order search in the admin panel
+ * to include the content of order notes. When an admin searches for a term,
+ * the search results will also check the order notes for matches and include
+ * any relevant orders in the results.
+ * 
+ */
+add_filter( 'posts_search', 'search_order_notes', 10, 2 );
+function search_order_notes( $search, $wp_query ) {
+    global $wpdb;
+
+    // Only modify the search query on WooCommerce orders page in the admin area
+    if ( ! is_admin() || empty( $search ) || empty( $_GET['s'] ) || $wp_query->query['post_type'] !== 'shop_order' ) {
+        return $search;
+    }
+
+    // Get the search term from the query
+    $search_term = esc_sql( $wpdb->esc_like( $_GET['s'] ) );
+
+    // Construct the subquery to search the order notes
+    $search_order_notes_query = " OR EXISTS (
+        SELECT * FROM {$wpdb->prefix}comments
+        WHERE comment_post_ID = {$wpdb->posts}.ID
+        AND comment_content LIKE '%$search_term%'
+        AND comment_type IN ('order_note', 'note')
+    )";
+
+    // Append our subquery to the main search query
+    $search = str_replace( '))', ")) {$search_order_notes_query}", $search );
+
+    return $search;
+}
